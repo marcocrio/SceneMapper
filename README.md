@@ -19,19 +19,29 @@ SceneMapper is a toolkit for analyzing video structure using AI-powered shot bou
 SceneMapper/
 ├── data/
 │   └── [video-name]/
-│       ├── input.mov
-│       ├── predictions.txt
-│       ├── scenes.txt
-│       ├── vis.png
-│       └── thumbnails/
-├── outputs/
-│   └── [video-name]_timeline.csv
+│       ├── input.mov               # Original video file
+│       ├── predictions.txt         # Transition scores
+│       ├── scenes.txt              # Detected scene boundaries
+│       ├── vis.png                 # Visualization of transitions
+│       ├── thumbnails/             # Thumbnails of key transitions
+│       │   ├── frame_0001.jpg
+│       │   └── frame_0002.jpg
+│       └── outputs/                # All exported files for Resolve, Premiere, etc.
+│           ├── [video-name]_timeline.csv
+│           └── [video-name]_timeline.xml
 ├── models/
-│   └── transnetv2-weights/
-├── extract_transitions.py
-├── export_timeline.py
+│   └── TransNetV2/
+│       ├── transnetv2.py
+│       ├── transnetv2-weights/
+│       │   ├── saved_model.pb
+│       │   └── variables/
+│       │       ├── variables.data-00000-of-00001
+│       │       └── variables.index
+│       └── LICENSE
 ├── utils/
 │   └── ffmpeg_tools.py
+├── extract_transitions.py
+├── export_timeline.py
 ├── main.py
 ├── requirements.txt
 └── README.md
@@ -55,7 +65,7 @@ conda create -n SceneMapper python=3.10
 conda activate SceneMapper
 ```
 
-> ⚠️ **Note:**: This assumes a MacOS development enviroment with M Chips
+> ⚠️ **Note**: This assumes a macOS development environment with Apple Silicon chips.
 
 ### 3. Install dependencies
 
@@ -84,6 +94,20 @@ This will:
 
 ---
 
+### 🔄 Updating the TransNetV2 model (weights or code)
+
+To update the model or pull latest changes from upstream:
+
+```bash
+cd models/TransNetV2
+git pull origin master
+```
+
+> This works if the folder was initialized with Git sparse-checkout.  
+> If not, follow the setup steps from `scripts/setup_transnetv2.sh` (coming soon).
+
+---
+
 ### 🔚 To deactivate the environment
 
 ```bash
@@ -108,15 +132,24 @@ conda deactivate
 
 ## 🛠️ Credits
 
-Built using [TransNetV2](https://github.com/soCzech/TransNetV2) by Pavel Sofranko.  
-Additional tooling and automation by [marcocrio](https://github.com/marcocrio).
+- Built using [TransNetV2](https://github.com/soCzech/TransNetV2) by Pavel Sofranko, used under the Apache 2.0 License.
+- The model and weights are located in `models/TransNetV2/`.
+- Additional tooling and automation by [marcocrio](https://github.com/marcocrio).
 
 ---
 
 ## 🧪 TODO
 
+- [ ] Add Instructions for other OS.
 - [ ] Add GUI or CLI prompts
 - [ ] Support EDL/FCPXML export
 - [ ] Add AI captioning for scenes
 - [ ] Batch processing of multiple videos
 - [ ] Test full pipeline on Linux and Windows
+
+
+
+
+
+
+

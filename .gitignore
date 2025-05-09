@@ -1,0 +1,29 @@
+# Ignore all user video data and outputs
+data/*
+!data/.gitkeep
+
+outputs/*
+!outputs/.gitkeep
+
+# Ignore intermediate prediction/thumbnail files
+**/*.predictions.txt
+**/*.scenes.txt
+**/*.vis.png
+**/thumbnails/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# VSCode/IDE settings
+.vscode/
+.idea/
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# macOS system files
+.DS_Store
