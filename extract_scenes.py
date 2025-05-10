@@ -43,15 +43,15 @@ target_folder = os.path.join("data", video_name)
 target_video_path = os.path.join(target_folder, "input.mov")
 
 # Prepare all subfolders
-os.makedirs(os.path.join(target_folder, "thumbnails"), exist_ok=True)
+os.makedirs(os.path.join(target_folder, "outputs" ,"thumbnails"), exist_ok=True)
 os.makedirs(os.path.join(target_folder, "outputs"), exist_ok=True)
 
 # Thumbnail folder logic
 if args.keep_history:
-    thumbnail_folder = os.path.join(target_folder, "thumbnails", f"{timestamp}")
+    thumbnail_folder = os.path.join(target_folder, "outputs", "thumbnails", f"{timestamp}")
     os.makedirs(thumbnail_folder, exist_ok=True)
 else:
-    thumbnail_folder = os.path.join(target_folder, "thumbnails")
+    thumbnail_folder = os.path.join(target_folder, "outputs", "thumbnails")
     for f in os.listdir(thumbnail_folder):
         path_to_delete = os.path.join(thumbnail_folder, f)
         if os.path.isfile(path_to_delete):
@@ -80,10 +80,10 @@ try:
 
     # Save outputs inside the project folder
     combined_predictions = np.stack((single_frame_predictions, all_frame_predictions), axis=1)
-    np.savetxt(os.path.join(target_folder, "predictions.txt"), combined_predictions, fmt="%.6f")
-    np.savetxt(os.path.join(target_folder, "scenes.txt"), model.predictions_to_scenes(single_frame_predictions), fmt="%d")
+    np.savetxt(os.path.join(target_folder, "outputs", "predictions.txt"), combined_predictions, fmt="%.6f")
+    np.savetxt(os.path.join(target_folder, "outputs", "scenes.txt"), model.predictions_to_scenes(single_frame_predictions), fmt="%d")
     model.visualize_predictions(video_frames, (single_frame_predictions, all_frame_predictions)).save(
-        os.path.join(target_folder, "vis.png")
+        os.path.join(target_folder, "outputs", "vis.png")
     )
 
 except Exception as e:
@@ -135,7 +135,7 @@ def extract_thumbnails(start, end, idx):
             exit(1)
 
 # Load scenes and extract thumbnails
-with open(os.path.join(target_folder, "scenes.txt"), "r") as f:
+with open(os.path.join(target_folder, "outputs", "scenes.txt"), "r") as f:
     scenes = [line.strip().split() for line in f.readlines()]
 
 for idx, (start, end) in enumerate(scenes):
@@ -144,16 +144,19 @@ for idx, (start, end) in enumerate(scenes):
 print("\n✅ Thumbnails successfully saved.")
 
 ################################################################################
-# 5️⃣ LOGGING OUTPUT IF SPECIFIED
+# 5️⃣ AUTO-CALL EXPORT TIMELINE
 ################################################################################
-if args.log:
-    log_file = os.path.join(target_folder, "outputs", f"thumbnail_log_{timestamp}.txt")
-    with open(log_file, "w") as log:
-        log.writelines(log_entries)
-    print(f"\n🗒️ Log file created: {log_file}")
+# Auto-call export_timeline.py
+print("\n📌 Calling `export_timeline.py` to generate CSV and JSON...")
+try:
+    subprocess.run(["python", "export_timeline.py", "--folder", video_name], check=True)
+    print("\n✅ Timeline export completed.")
+except Exception as e:
+    print(f"❌ Timeline export failed: {e}")
+
 
 ################################################################################
-# 6️⃣ OPTIONAL: OPEN THE FOLDER IF SPECIFIED
+# 6️⃣ OPEN THE FOLDER IF SPECIFIED
 ################################################################################
 if args.open:
     print(f"\n🗂️ Opening folder: {target_folder}")
