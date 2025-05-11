@@ -17,18 +17,18 @@ Tk().withdraw()
 ################################################################################
 # 1️⃣ ARGUMENT PARSING
 ################################################################################
-parser = argparse.ArgumentParser(description="Extract scenes, thumbnails, and BPM from a video.")
+parser = argparse.ArgumentParser(description="Extract scenes and thumbnails from a video.")
 parser.add_argument("-t", "--thumbnails", type=int, default=3, help="Number of thumbnails per scene (default: 3)")
 parser.add_argument("-o", "--open", action="store_true", help="Open the folder after processing")
 parser.add_argument("-l", "--log", action="store_true", help="Save the thumbnail extraction log")
+parser.add_argument("-n", "--num-threads", type=int, default=8, help="Number of threads for thumbnail extraction (default: 8)")
 parser.add_argument("-r", "--replace", action="store_true", help="Automatically replace the video file if it exists.")
-parser.add_argument("--keep-history", action="store_true", help="Keep a timestamped folder of thumbnails instead of overwriting")
-parser.add_argument("--fast", action="store_true", help="Skip console output for faster processing.")
 parser.allow_abbrev = True
 args = parser.parse_args()
 
 # Timestamp for unique folder names if --keep-history is used
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+log_entries = []
 
 print(f"\n")
 print("- 🔎 Select the video file to process:")
@@ -49,7 +49,7 @@ target_folder = os.path.join("projects", video_name)
 target_video_path = os.path.join(target_folder, f"{video_name}{video_ext}")
 
 # Prepare all subfolders
-os.makedirs(os.path.join(target_folder, "outputs" ,"thumbnails"), exist_ok=True)
+os.makedirs(os.path.join(target_folder, "outputs", "thumbnails"), exist_ok=True)
 os.makedirs(os.path.join(target_folder, "outputs"), exist_ok=True)
 
 ################################################################################
@@ -59,14 +59,18 @@ if os.path.exists(target_video_path):
     if args.replace:
         print("⚠️ Replacing existing file.")
     else:
-        result = messagebox.askquestion("File already exists", f"The file '{target_video_path}' already exists. Replace it?")
-        if result == 'yes':
-            print("⚠️ Replacing existing file.")
-        elif result == 'no':
-            print("✅ Using the existing file.")
-        else:
+        root = Tk()
+        root.withdraw()
+        result = messagebox.askyesnocancel("File Exists", "The file already exists. Replace it?")
+        root.update()
+        root.destroy()
+        if result is None:
             print("❌ Operation cancelled.")
             sys.exit(0)
+        elif result:
+            print("⚠️ Replacing existing file.")
+        else:
+            print("✅ Using the existing file.")
 
 ################################################################################
 # 2️⃣ COPY VIDEO INTO PROJECT FOLDER
@@ -104,22 +108,26 @@ except Exception as e:
 ################################################################################
 # 4️⃣ AUDIO EXTRACTION AND BPM ANALYSIS
 ################################################################################
-print("\n🎵 Extracting audio and analyzing BPM...")
-audio_path = os.path.join(target_folder, "outputs", "audio.wav")
-
-# Extract audio with ffmpeg
 try:
-    subprocess.run([
-        "ffmpeg", "-y", "-i", target_video_path, "-vn", 
-        "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2", audio_path
-    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print("\n- 🎵 Extracting audio and analyzing BPM...")
+    audio_path = os.path.join(target_folder, "outputs", "audio.wav")
+    if os.path.exists(audio_path):
+        print("⚠️ Existing audio file found. Deleting before extraction.")
+        os.remove(audio_path)
 
-    # Analyze BPM
+    subprocess.run([
+        "ffmpeg", "-i", target_video_path, 
+        "-vn", "-acodec", "pcm_s16le", 
+        "-ar", "44100", "-ac", "2", audio_path
+    ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    
     y, sr = librosa.load(audio_path)
     tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-    print(f"🎵 BPM Detected: {tempo}")
+    print(f"\n🎵 BPM Detected: {tempo}\n")
+    log_entries.append(f"BPM Detected: {tempo}")
 except Exception as e:
-    print(f"⚠️ Could not detect BPM. Error: {e}")
+    print(f"⚠️ Audio processing failed: {e}")
+    log_entries.append(f"Audio processing failed: {e}")
 
 ################################################################################
 # 5️⃣ THUMBNAIL EXTRACTION (Multithreaded + Progress Bar)
@@ -144,7 +152,7 @@ with open(os.path.join(target_folder, "outputs", "scenes.txt"), "r") as f:
     scenes = [line.strip().split() for line in f.readlines()]
 
 tasks = []
-with ThreadPoolExecutor(max_workers=8) as executor:
+with ThreadPoolExecutor(max_workers=args.num_threads) as executor:
     with tqdm(total=len(scenes) * args.thumbnails, desc="📸 Extracting Thumbnails", unit="thumb") as pbar:
         for idx, (start, end) in enumerate(scenes):
             step = max(1, (int(end) - int(start)) // (args.thumbnails - 1))
