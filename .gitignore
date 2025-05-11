@@ -1,6 +1,6 @@
 # Ignore all user video data and outputs
-data/*
-!data/.gitkeep
+projects/*
+!projects/.gitkeep
 
 outputs/*
 !outputs/.gitkeep
@@ -27,3 +27,7 @@ venv/
 
 # macOS system files
 .DS_Store
+
+
+# test modules
+module_test.py

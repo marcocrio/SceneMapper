@@ -2,11 +2,13 @@ import os
 import shutil
 import subprocess
 import argparse
-from tkinter import Tk, filedialog
+from tkinter import Tk, filedialog, messagebox
 from models.TransNetV2.transnetv2 import TransNetV2
 import numpy as np
 import datetime
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
 
 # Hide Tkinter root window
 Tk().withdraw()
@@ -18,6 +20,7 @@ parser = argparse.ArgumentParser(description="Extract scenes and thumbnails from
 parser.add_argument("-t", "--thumbnails", type=int, default=3, help="Number of thumbnails per scene (default: 3)")
 parser.add_argument("-o", "--open", action="store_true", help="Open the folder after processing")
 parser.add_argument("-l", "--log", action="store_true", help="Save the thumbnail extraction log")
+parser.add_argument("-r", "--replace", action="store_true", help="Automatically replace the video file if it exists.")
 parser.add_argument("--keep-history", action="store_true", help="Keep a timestamped folder of thumbnails instead of overwriting")
 parser.allow_abbrev = True
 args = parser.parse_args()
@@ -39,29 +42,32 @@ if not video_path:
 
 # Extract video name and prepare paths
 video_name = os.path.splitext(os.path.basename(video_path))[0]
-target_folder = os.path.join("data", video_name)
-target_video_path = os.path.join(target_folder, "input.mov")
+video_ext = os.path.splitext(video_path)[1]
+target_folder = os.path.join("projects", video_name)
+target_video_path = os.path.join(target_folder, f"{video_name}{video_ext}")
 
 # Prepare all subfolders
 os.makedirs(os.path.join(target_folder, "outputs" ,"thumbnails"), exist_ok=True)
 os.makedirs(os.path.join(target_folder, "outputs"), exist_ok=True)
 
-# Thumbnail folder logic
-if args.keep_history:
-    thumbnail_folder = os.path.join(target_folder, "outputs", "thumbnails", f"{timestamp}")
-    os.makedirs(thumbnail_folder, exist_ok=True)
-else:
-    thumbnail_folder = os.path.join(target_folder, "outputs", "thumbnails")
-    for f in os.listdir(thumbnail_folder):
-        path_to_delete = os.path.join(thumbnail_folder, f)
-        if os.path.isfile(path_to_delete):
-            os.remove(path_to_delete)
-        elif os.path.isdir(path_to_delete):
-            shutil.rmtree(path_to_delete)
-
+################################################################################
+# 🚫 BLOCKING ALERT LOGIC
+################################################################################
+if os.path.exists(target_video_path):
+    if args.replace:
+        print("⚠️ Replacing existing file.")
+    else:
+        result = messagebox.askquestion("File already exists", f"The file '{target_video_path}' already exists. Replace it?")
+        if result == 'yes':
+            print("⚠️ Replacing existing file.")
+        elif result == 'no':
+            print("✅ Using the existing file.")
+        else:
+            print("❌ Operation cancelled.")
+            sys.exit(0)
 
 ################################################################################
-# 2️⃣ COPY VIDEO INTO DATA FOLDER
+# 2️⃣ COPY VIDEO INTO PROJECT FOLDER
 ################################################################################
 print(f"\n")
 print(f"- 📂 Copying video to: {target_video_path}")
@@ -94,72 +100,51 @@ except Exception as e:
     exit(1)
 
 ################################################################################
-# 4️⃣ THUMBNAIL EXTRACTION
+# 4️⃣ THUMBNAIL EXTRACTION (Multithreaded + Progress Bar)
 ################################################################################
 print(f"\n")
-print(f"- 🖼️ Extracting thumbnails to: {thumbnail_folder}")
+print(f"- 🖼️ Extracting thumbnails to: {os.path.join(target_folder, 'outputs', 'thumbnails')}")
 
-log_entries = []
-
-def extract_thumbnails(start, end, idx):
-    """ Extracts thumbnails evenly spaced between start and end frames. """
-    step = max(1, (end - start) // (args.thumbnails - 1))
-    frames = list(range(start, end, step))[:args.thumbnails]
-    if len(frames) < args.thumbnails:
-        frames.append(end)
-
-    for i, frame in enumerate(frames):
-        thumb_path = os.path.join(thumbnail_folder, f"scene_{idx:03d}_{i}.jpg")
-        
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-i", target_video_path,
-            "-vf", f"select=eq(n\\,{frame})",
-            "-vframes", "1",
-            thumb_path
-        ]
-
-        try:
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            log_entries.append(f"[{datetime.datetime.now()}] Extracted scene {idx} frame {i} → {thumb_path}\n")
-            percent_complete = round(((idx * args.thumbnails + i + 1) / (len(scenes) * args.thumbnails)) * 100, 2)
-            print(f"\r📸 [{percent_complete}%] Processing thumbnails... ", end="")
-        except KeyboardInterrupt:
-            print("\n🛑 Process interrupted by user. Exiting gracefully.")
-            if args.log:
-                log_file = os.path.join(target_folder, "outputs", f"thumbnail_log_{timestamp}.txt")
-                with open(log_file, "w") as log:
-                    log.writelines(log_entries)
-                print(f"💾 Partial log saved to {log_file}")
-            exit(1)
+def extract_thumbnail(frame, thumb_path):
+    """ Extract a single thumbnail. """
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i", target_video_path,
+        "-vf", f"select=eq(n\\,{frame})",
+        "-vframes", "1",
+        thumb_path
+    ]
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 # Load scenes and extract thumbnails
 with open(os.path.join(target_folder, "outputs", "scenes.txt"), "r") as f:
     scenes = [line.strip().split() for line in f.readlines()]
 
-for idx, (start, end) in enumerate(scenes):
-    extract_thumbnails(int(start), int(end), idx)
+tasks = []
+with ThreadPoolExecutor(max_workers=8) as executor:
+    with tqdm(total=len(scenes) * args.thumbnails, desc="📸 Extracting Thumbnails", unit="thumb") as pbar:
+        for idx, (start, end) in enumerate(scenes):
+            step = max(1, (int(end) - int(start)) // (args.thumbnails - 1))
+            frames = list(range(int(start), int(end), step))[:args.thumbnails]
+            if len(frames) < args.thumbnails:
+                frames.append(int(end))
+
+            for i, frame in enumerate(frames):
+                thumb_path = os.path.join(target_folder, "outputs", "thumbnails", f"scene_{idx:03d}_{i}.jpg")
+                future = executor.submit(extract_thumbnail, frame, thumb_path)
+                tasks.append(future)
+        
+        for future in as_completed(tasks):
+            pbar.update(1)
 
 print("\n✅ Thumbnails successfully saved.")
 
 ################################################################################
-# 5️⃣ AUTO-CALL EXPORT TIMELINE
-################################################################################
-# Auto-call export_timeline.py
-print("\n📌 Calling `export_timeline.py` to generate CSV and JSON...")
-try:
-    subprocess.run(["python", "export_timeline.py", "--folder", video_name], check=True)
-    print("\n✅ Timeline export completed.")
-except Exception as e:
-    print(f"❌ Timeline export failed: {e}")
-
-
-################################################################################
-# 6️⃣ OPEN THE FOLDER IF SPECIFIED
+# 5️⃣ OPEN THE FOLDER IF SPECIFIED
 ################################################################################
 if args.open:
     print(f"\n🗂️ Opening folder: {target_folder}")
-    subprocess.run(["open", target_folder])
+    subprocess.run(["open", tar get_folder])
 
 print(f"\n✅ Finished processing. All results are in: {target_folder}\n")

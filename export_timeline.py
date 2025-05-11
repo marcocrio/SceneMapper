@@ -1,97 +1,103 @@
 import os
-import csv
-import json
-import ffmpeg
-import subprocess
 import argparse
+import ffmpeg
+import pandas as pd
+import json
+from tkinter import Tk, filedialog
+
+# Hide Tkinter root window
+Tk().withdraw()
 
 ################################################################################
 # 1️⃣ ARGUMENT PARSING
 ################################################################################
-parser = argparse.ArgumentParser(description="Export timeline from processed video data.")
-parser.add_argument("--folder", type=str, required=True, help="Name of the video folder to process.")
+parser = argparse.ArgumentParser(description="Export timeline as CSV and JSON with metadata.")
+parser.add_argument("--folder", type=str, required=True, help="Project folder name")
+parser.add_argument("--ext", type=str, required=True, help="File extension of the video")
+parser.allow_abbrev = True
 args = parser.parse_args()
 
-# Extract video name from argument
-video_name = args.folder
-target_folder = os.path.join("data", video_name)
-output_folder = os.path.join(target_folder, "outputs")
+# Prepare paths
+folder_name = args.folder
+video_extension = args.ext
+folder_path = os.path.join("projects", folder_name, "outputs")
+video_path = os.path.join("projects", folder_name, f"{folder_name}.{video_extension}")
 
-print(f"\n🎥 Video selected: {video_name}")
-print(f"📁 Project folder: {output_folder}")
-
-# Check for processed files in outputs
-scenes_file = os.path.join(output_folder, "scenes.txt")
-predictions_file = os.path.join(output_folder, "predictions.txt")
-vis_file = os.path.join(output_folder, "vis.png")
-
-# If they don't exist, we exit gracefully
-if not all(os.path.exists(f) for f in [scenes_file, predictions_file, vis_file]):
-    print(f"❌ Required files not found in {output_folder}. Has the video been processed?")
+# Validate existence
+if not os.path.exists(video_path):
+    print(f"❌ Video file not found: {video_path}")
     exit(1)
 
-# Read scenes.txt
-with open(scenes_file, "r") as f:
-    scenes = [line.strip().split() for line in f.readlines()]
+# Output paths
+csv_path = os.path.join(folder_path, "timeline.csv")
+json_path = os.path.join(folder_path, "timeline.json")
 
-# Extract metadata with ffmpeg
+################################################################################
+# 2️⃣ VIDEO METADATA EXTRACTION
+################################################################################
+print("\n🎥 Video selected:", folder_name)
+print(f"📁 Project folder: {folder_path}")
+
+# Get video metadata
 try:
-    video_path = os.path.join(target_folder, "input.mov")
     probe = ffmpeg.probe(video_path)
     video_info = next(stream for stream in probe['streams'] if stream['codec_type'] == 'video')
+    resolution = f"{video_info['width']}x{video_info['height']}"
     fps = eval(video_info['r_frame_rate'])
-    duration = float(video_info['duration'])
-    width = video_info['width']
-    height = video_info['height']
+    duration = float(probe['format']['duration'])
+
+    print("\n🎥 Video Info:")
+    print(f" - Resolution: {resolution}")
+    print(f" - FPS: {fps}")
+    print(f" - Duration: {duration} seconds")
+
 except Exception as e:
     print(f"❌ Failed to retrieve video metadata: {e}")
     exit(1)
 
-print(f"\n🎥 Video Info:")
-print(f" - Resolution: {width}x{height}")
-print(f" - FPS: {fps}")
-print(f" - Duration: {duration} seconds")
+################################################################################
+# 3️⃣ SCENES LOADING AND DATAFRAME CREATION
+################################################################################
+scenes_path = os.path.join(folder_path, "scenes.txt")
 
-# Convert frames to timestamps
-def frame_to_timestamp(frame, fps):
-    seconds = frame / fps
-    millis = int((seconds - int(seconds)) * 1000)
-    minutes, seconds = divmod(int(seconds), 60)
-    hours, minutes = divmod(minutes, 60)
-    return f"{hours:02}:{minutes:02}:{seconds:02}.{millis:03}"
+if not os.path.exists(scenes_path):
+    print(f"❌ Scenes file not found: {scenes_path}")
+    exit(1)
 
-timeline_data = []
+# Load scenes
+print("\n🔍 Loading scenes from:", scenes_path)
+scenes = []
+with open(scenes_path, "r") as f:
+    for idx, line in enumerate(f):
+        start, end = map(int, line.strip().split())
+        scenes.append({
+            "Scene": idx + 1,
+            "Start Frame": start,
+            "End Frame": end,
+            "Start Time": f"{start / fps:.2f}",
+            "End Time": f"{end / fps:.2f}",
+            "Duration (s)": f"{(end - start) / fps:.2f}"
+        })
 
-for idx, (start_frame, end_frame) in enumerate(scenes):
-    start_frame, end_frame = int(start_frame), int(end_frame)
-    midpoint_frame = (start_frame + end_frame) // 2
+# Create DataFrame
+df = pd.DataFrame(scenes)
 
-    timeline_data.append({
-        "Scene Number": idx + 1,
-        "Start Frame": start_frame,
-        "End Frame": end_frame,
-        "Midpoint Frame": midpoint_frame,
-        "Start Time": frame_to_timestamp(start_frame, fps),
-        "End Time": frame_to_timestamp(end_frame, fps),
-        "Midpoint Time": frame_to_timestamp(midpoint_frame, fps)
-    })
+################################################################################
+# 4️⃣ EXPORT TO CSV AND JSON
+################################################################################
+print("\n💾 Saving timeline to CSV and JSON...")
+df.to_csv(csv_path, index=False)
+with open(json_path, "w") as json_file:
+    json.dump({
+        "metadata": {
+            "resolution": resolution,
+            "fps": fps,
+            "duration": duration,
+        },
+        "scenes": scenes
+    }, json_file, indent=4)
 
-# Save CSV
-csv_file = os.path.join(output_folder, "timeline.csv")
-with open(csv_file, mode='w', newline='') as file:
-    writer = csv.DictWriter(file, fieldnames=timeline_data[0].keys())
-    writer.writeheader()
-    writer.writerows(timeline_data)
-print(f"\n✅ CSV Timeline saved to: {csv_file}")
-
-# Save JSON
-json_file = os.path.join(output_folder, "timeline.json")
-with open(json_file, 'w') as file:
-    json.dump(timeline_data, file, indent=4)
-print(f"\n✅ JSON Timeline saved to: {json_file}")
-
-# # Open the folder after processing
-# print(f"\n🗂️ Opening folder: {output_folder}")
-# subprocess.run(["open", output_folder])
-
-print(f"\n✅ Finished exporting timeline. All results are in: {output_folder}\n")
+print(f"\n✅ Timeline exported:")
+print(f" - CSV: {csv_path}")
+print(f" - JSON: {json_path}")
+print(f"\n✅ Finished processing. All results are in the outputs folder.")
