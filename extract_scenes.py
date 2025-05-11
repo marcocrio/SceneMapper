@@ -9,6 +9,7 @@ import datetime
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
+import librosa
 
 # Hide Tkinter root window
 Tk().withdraw()
@@ -16,12 +17,13 @@ Tk().withdraw()
 ################################################################################
 # 1️⃣ ARGUMENT PARSING
 ################################################################################
-parser = argparse.ArgumentParser(description="Extract scenes and thumbnails from a video.")
+parser = argparse.ArgumentParser(description="Extract scenes, thumbnails, and BPM from a video.")
 parser.add_argument("-t", "--thumbnails", type=int, default=3, help="Number of thumbnails per scene (default: 3)")
 parser.add_argument("-o", "--open", action="store_true", help="Open the folder after processing")
 parser.add_argument("-l", "--log", action="store_true", help="Save the thumbnail extraction log")
 parser.add_argument("-r", "--replace", action="store_true", help="Automatically replace the video file if it exists.")
 parser.add_argument("--keep-history", action="store_true", help="Keep a timestamped folder of thumbnails instead of overwriting")
+parser.add_argument("--fast", action="store_true", help="Skip console output for faster processing.")
 parser.allow_abbrev = True
 args = parser.parse_args()
 
@@ -100,7 +102,27 @@ except Exception as e:
     exit(1)
 
 ################################################################################
-# 4️⃣ THUMBNAIL EXTRACTION (Multithreaded + Progress Bar)
+# 4️⃣ AUDIO EXTRACTION AND BPM ANALYSIS
+################################################################################
+print("\n🎵 Extracting audio and analyzing BPM...")
+audio_path = os.path.join(target_folder, "outputs", "audio.wav")
+
+# Extract audio with ffmpeg
+try:
+    subprocess.run([
+        "ffmpeg", "-y", "-i", target_video_path, "-vn", 
+        "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2", audio_path
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # Analyze BPM
+    y, sr = librosa.load(audio_path)
+    tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+    print(f"🎵 BPM Detected: {tempo}")
+except Exception as e:
+    print(f"⚠️ Could not detect BPM. Error: {e}")
+
+################################################################################
+# 5️⃣ THUMBNAIL EXTRACTION (Multithreaded + Progress Bar)
 ################################################################################
 print(f"\n")
 print(f"- 🖼️ Extracting thumbnails to: {os.path.join(target_folder, 'outputs', 'thumbnails')}")
@@ -141,10 +163,10 @@ with ThreadPoolExecutor(max_workers=8) as executor:
 print("\n✅ Thumbnails successfully saved.")
 
 ################################################################################
-# 5️⃣ OPEN THE FOLDER IF SPECIFIED
+# 6️⃣ OPEN THE FOLDER IF SPECIFIED
 ################################################################################
 if args.open:
     print(f"\n🗂️ Opening folder: {target_folder}")
-    subprocess.run(["open", tar get_folder])
+    subprocess.run(["open", target_folder])
 
 print(f"\n✅ Finished processing. All results are in: {target_folder}\n")
